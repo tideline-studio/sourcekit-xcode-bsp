@@ -1,71 +1,62 @@
-# Apple platform development in IDEs like Cursor and VSCode, for native Xcode projects
+# sourcekit-xcode-bsp
 
-**sourcekit-xcode-bsp** is a [Build Server Protocol](https://build-server-protocol.github.io/) implementation that bridges [sourcekit-lsp](https://github.com/swiftlang/sourcekit-lsp) (Swift's official [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) server) and native Xcode projects (`.xcodeproj` / `.xcworkspace`). It uses [swift-build](https://github.com/swiftlang/swift-build) under the hood so you can get code intelligence for Swift and Apple-platform projects in any LSP-capable editor — Cursor, VSCode, and others — without relying on the Xcode IDE itself.
+A [Build Server Protocol](https://build-server-protocol.github.io/) server that connects [sourcekit-lsp](https://github.com/swiftlang/sourcekit-lsp) to native Xcode projects (`.xcodeproj` / `.xcworkspace`). It uses [swift-build](https://github.com/swiftlang/swift-build), the same build engine as Xcode, so Swift code intelligence works in Cursor, VS Code, and other LSP editors.
+
+The server reloads when project metadata changes, such as `project.pbxproj` or `Package.resolved`.
 
 > [!IMPORTANT]
-> sourcekit-xcode-bsp is designed for **native Xcode projects**. It is not a Bazel integration. For Bazel-based projects, see [sourcekit-bazel-bsp](https://github.com/spotify/sourcekit-bazel-bsp) by Spotify.
+> For native Xcode projects only. For Bazel, use [sourcekit-bazel-bsp](https://github.com/spotify/sourcekit-bazel-bsp).
 
 > [!NOTE]
-> This project is early-stage (v0.0.1). APIs and setup flows may change.
-
-## Features
-
-- Code completion, jump to definition, diagnostics, and other indexing features powered by [sourcekit-lsp](https://github.com/swiftlang/sourcekit-lsp)
-- Works with standard `.xcodeproj` and `.xcworkspace` projects via swift-build
-- Interactive `init` command to generate a `buildServer.json` configuration
-- Workspace file watching for incremental rebuilds
+> Early-stage. APIs and setup may change.
 
 ## Requirements
 
-- **macOS 15+**
-- **Xcode 26+** installed and selected via `xcode-select` (platform SDKs and toolchains come from Xcode)
-- **Swift 6.2+** to build from source
+- macOS 15+
+- Xcode 26+, selected with `xcode-select` (or `DEVELOPER_DIR`). You still need Xcode installed for SDKs and toolchains.
+- Swift 6.2+ to build from source
 
-You still need Xcode installed for Apple platform SDKs and build tooling, even when developing in another editor.
+## Install
 
-## Quick start
-
-### 1. Install
-
-**Homebrew** (recommended):
+Homebrew:
 
 ```bash
 brew tap slime-studio/tap
 brew install sourcekit-xcode-bsp
 ```
 
-**Build from source** (requires Swift 6.2+):
+From source:
 
 ```bash
 git clone https://github.com/slime-studio/sourcekit-xcode-bsp.git
 cd sourcekit-xcode-bsp
 swift build -c release
-cp .build/release/sourcekit-xcode-bsp /usr/local/bin/
+cp .build/release/sourcekit-xcode-bsp .build/release/SWBBuildServiceBundle /usr/local/bin/
 ```
 
-### 2. Generate `buildServer.json`
+`SWBBuildServiceBundle` must stay next to the `sourcekit-xcode-bsp` binary.
+
+## Setup
 
 From your Xcode project root:
 
 ```bash
-/path/to/sourcekit-xcode-bsp init
+sourcekit-xcode-bsp init
 ```
 
-This interactively writes a `buildServer.json` that tells sourcekit-lsp how to launch the BSP server. You can also create the file by hand — see [Configuration](#configuration) below.
+This writes `buildServer.json` in the current directory. It detects a `.xcworkspace` or `.xcodeproj`, defaults the platform to `iphonesimulator`, and sets `argv` to the binary you just ran.
 
-### 3. Open your project in an LSP-capable editor
+Then in Cursor or VS Code:
 
-#### Cursor / VSCode
+1. Install the [Swift](https://marketplace.visualstudio.com/items?itemName=swiftlang.swift-vscode) extension.
+2. Open the folder that contains `buildServer.json`.
+3. Run **Swift: Restart LSP Server** from the command palette (`Cmd+Shift+P`), or reload the window.
 
-1. Install the official [Swift](https://marketplace.visualstudio.com/items?itemName=swiftlang.swift-vscode) extension.
-2. Open the folder containing your `buildServer.json`.
-3. Restart the language server (`Cmd+Shift+P` → **Swift: Restart LSP Server**) or reload the window.
-
-sourcekit-lsp discovers `buildServer.json` automatically and launches `sourcekit-xcode-bsp` using the `argv` entry.
+sourcekit-lsp reads `buildServer.json` and launches this server over stdio. Bare `sourcekit-xcode-bsp` and `sourcekit-xcode-bsp serve` both run the server.
 
 ## Configuration
 
-`buildServer.json` lives at the root of the workspace you open in your editor. A minimal example:
+`buildServer.json` lives at the workspace root. Minimal example:
 
 ```json
 {
@@ -78,84 +69,37 @@ sourcekit-lsp discovers `buildServer.json` automatically and launches `sourcekit
 }
 ```
 
-### Project-specific fields
-
 | Field | Required | Description |
 |-------|----------|-------------|
-| `workspace` | Yes | Path to `.xcodeproj` or `.xcworkspace` (relative to `buildServer.json` or absolute) |
+| `workspace` | Yes | Path to `.xcodeproj` or `.xcworkspace`, relative to this file or absolute |
 | `buildRoot` | No | Build artifacts directory. Defaults to `.build/derived-data` |
-| `platform` | No | Target platform, e.g. `iphonesimulator`, `iphoneos`, `macosx`. If omitted, swift-build chooses a default |
-| `serviceBundlePath` | No | Path to `SWBBuildServiceBundle`. If omitted, uses the service bundled alongside the binary |
-| `synchronousBuildDescriptionSerialization` | No | Write the build description before notifying SourceKit-LSP, avoiding empty diagnostics on startup. Defaults to `true` |
-
-### CLI reference
-
-```bash
-# Run the BSP server (default; invoked by sourcekit-lsp via argv)
-sourcekit-xcode-bsp
-sourcekit-xcode-bsp serve
-
-# Generate buildServer.json interactively
-sourcekit-xcode-bsp init
-```
+| `platform` | No | Run destination, such as `iphonesimulator`, `iphoneos`, or `macosx`. `init` defaults to `iphonesimulator`. If omitted, swift-build chooses one |
+| `serviceBundlePath` | No | Path to `SWBBuildServiceBundle`. Defaults to the copy next to the binary |
+| `synchronousBuildDescriptionSerialization` | No | Write the build description before notifying SourceKit-LSP, so the first diagnostics are not empty. Defaults to `true` |
 
 ## Development
 
 ```bash
-# Build
 swift build
-
-# Run tests
 swift test
-
-# Build release binary
-swift build -c release
-
-# Lint
 swiftlint lint
 ```
 
-### Pre-commit hooks
-
-This repo uses [pre-commit](https://pre-commit.com) to lint staged Swift files with
-[SwiftLint](https://github.com/realm/SwiftLint) before each commit.
-
-```bash
-brew install pre-commit swiftlint
-pre-commit install
-```
-
-After that, `git commit` runs SwiftLint automatically against whatever `.swift` files are
-staged. Run it manually against everything with `pre-commit run --all-files`.
-
-### Project layout
-
-```
-Sources/
-  sourcekit-xcode-bsp/     # CLI executable (serve, init)
-  SourceKitXcodeBSP/       # Core BSP server library
-  test-ipc/                # Internal IPC debugging tool (not shipped)
-Tests/
-  SourceKitXcodeBSPTests/
-```
+Optional hook: `brew install pre-commit swiftlint && pre-commit install`. Commits then lint staged Swift files.
 
 ## Troubleshooting
 
-### Verify the BSP is running
+In Cursor or VS Code, open **Output** and choose **SourceKit Language Server**. After you open a Swift file you should see the BSP start. Server logs go to stderr with a prefix like `[sourcekit-xcode-bsp:bootstrap]`.
 
-In Cursor / VSCode, open the **Output** panel and select **SourceKit Language Server**. After opening a Swift file you should see the LSP activate and the BSP bootstrap. Server logs are written to **stderr** with the prefix `[sourcekit-xcode-bsp:…]` — check your editor's LSP or task output for these lines.
-
-### Common issues
-
-- **`buildServer.json` not found** — the file must live in the workspace root that your editor opens.
-- **Workspace not found** — confirm the `workspace` path in `buildServer.json` points to a valid `.xcodeproj` or `.xcworkspace`.
-- **Xcode not found** — run `xcode-select -p` and ensure Xcode 26+ is installed. You can override with `DEVELOPER_DIR`.
+- **`buildServer.json` not found**: put the file in the folder your editor opened as the workspace root.
+- **Workspace not found**: `workspace` must point at a real `.xcodeproj` or `.xcworkspace`.
+- **Xcode not found**: run `xcode-select -p` and confirm Xcode 26+ is selected. Override with `DEVELOPER_DIR` if needed.
 
 ## Related projects
 
-- [sourcekit-bazel-bsp](https://github.com/spotify/sourcekit-bazel-bsp) — BSP for Bazel-based Apple development (reference implementation)
-- [xcode-build-server](https://github.com/SolaWing/xcode-build-server) — alternative BSP approach using `xcodebuild` logs
-- [sourcekit-lsp](https://github.com/swiftlang/sourcekit-lsp) — Swift language server that consumes BSP configuration
+- [sourcekit-lsp](https://github.com/swiftlang/sourcekit-lsp): Swift language server that consumes this BSP
+- [sourcekit-bazel-bsp](https://github.com/spotify/sourcekit-bazel-bsp): same idea for Bazel
+- [xcode-build-server](https://github.com/SolaWing/xcode-build-server): alternative BSP that parses `xcodebuild` logs
 
 ## License
 
